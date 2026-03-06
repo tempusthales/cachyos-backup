@@ -9,6 +9,7 @@
 set -euo pipefail
 
 # ── Config (set dynamically at startup) ──────────────────────
+VERSION="0.0.7"
 BACKUP_ROOT=""
 USER_HOME=""
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
@@ -72,47 +73,45 @@ do_backup() {
 
     mkdir -p "$BACKUP_DIR"
 
-    info "Backing up .config..."
-    cp -r "$USER_HOME/.config" "$BACKUP_DIR/" && success ".config done"
+    # Full home directory via rsync
+    local t_start t_end t_elapsed
+    t_start=$(date +%s)
+    info "Backing up entire home directory (~/)..."
+    info "Excluded: .cache, Steam, Trash, node_modules, .git, containers"
+    rsync -a --info=progress2 --no-inc-recursive \
+        --exclude=".cache" \
+        --exclude=".local/share/Trash" \
+        --exclude=".local/share/Steam" \
+        --exclude=".local/share/baloo" \
+        --exclude=".local/share/akonadi" \
+        --exclude=".local/share/containers" \
+        --exclude="*/node_modules" \
+        --exclude="*/.git" \
+        "$USER_HOME/" "$BACKUP_DIR/home/"
+    t_end=$(date +%s)
+    t_elapsed=$(( t_end - t_start ))
+    success "Home directory done in $(( t_elapsed / 60 ))m $(( t_elapsed % 60 ))s"
 
-    info "Backing up .local/share..."
-    cp -r "$USER_HOME/.local/share" "$BACKUP_DIR/" && success ".local/share done"
-
-    if [[ -d "$USER_HOME/.ssh" ]]; then
-        info "Backing up SSH keys..."
-        cp -r "$USER_HOME/.ssh" "$BACKUP_DIR/" && success "SSH keys done"
-    else
-        warn "No .ssh directory found, skipping"
-    fi
-
-    if [[ -d "$USER_HOME/.gnupg" ]]; then
-        info "Backing up GPG keys..."
-        cp -r "$USER_HOME/.gnupg" "$BACKUP_DIR/" && success "GPG keys done"
-    else
-        warn "No .gnupg directory found, skipping"
-    fi
-
-    if [[ -d "$USER_HOME/AppImages" ]]; then
-        info "Backing up AppImages..."
-        cp -r "$USER_HOME/AppImages" "$BACKUP_DIR/" && success "AppImages done"
-    fi
-
-    info "Backing up AppImages from Downloads..."
-    mkdir -p "$BACKUP_DIR/downloads-appimages"
-    find "$USER_HOME/Downloads" -maxdepth 1 \( -name "*.AppImage" -o -name "*.appimage" \) \
-        -exec cp {} "$BACKUP_DIR/downloads-appimages/" \; 2>/dev/null && success "Downloads AppImages done"
-
+    # fstab
+    t_start=$(date +%s)
     info "Backing up /etc/fstab..."
-    sudo cp /etc/fstab "$BACKUP_DIR/fstab" && success "fstab done"
+    sudo cp /etc/fstab "$BACKUP_DIR/fstab"
+    t_end=$(date +%s)
+    success "fstab done in $(( t_end - t_start ))s"
 
+    # Package lists
+    t_start=$(date +%s)
     info "Saving package lists..."
     pacman -Qe > "$BACKUP_DIR/packages-explicit.txt"
     pacman -Qm > "$BACKUP_DIR/packages-aur.txt"
     pacman -Q  > "$BACKUP_DIR/packages-all.txt"
-    success "Package lists saved"
+    t_end=$(date +%s)
+    success "Package lists saved in $(( t_end - t_start ))s"
 
+    # Update latest symlink
     ln -sfn "$BACKUP_DIR" "$LATEST_LINK"
 
+    # Summary
     local total_end total_elapsed
     total_end=$(date +%s)
     total_elapsed=$(( total_end - total_start ))
@@ -304,7 +303,7 @@ do_cleanup() {
 # ── Main menu ─────────────────────────────────────────────────
 main_menu() {
     clear
-    header "CachyOS Backup & Restore"
+    header "CachyOS Backup & Restore  v${VERSION}"
     echo -e "  User:            ${CYAN}$USER_HOME${RESET}"
     echo -e "  Backup location: ${CYAN}$BACKUP_ROOT${RESET}"
     echo ""
@@ -327,7 +326,6 @@ main_menu() {
 }
 
 # ── Entry point ───────────────────────────────────────────────
-# Validate sudo upfront so it does not interrupt the backup
 echo ""
 info "This script requires sudo for backing up /etc/fstab."
 sudo -v || { error "sudo authentication failed"; exit 1; }
