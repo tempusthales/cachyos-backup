@@ -3,7 +3,7 @@
 #  Author: Tempus Thales
 #  Description: Backup & Restore Script
 #  Usage: ./backup_tool.sh
-#  Version: 0.0.2
+#  Version: 0.0.3
 # ============================================================
 
 set -euo pipefail
@@ -109,12 +109,6 @@ do_backup() {
     pacman -Q  > "$BACKUP_DIR/packages-all.txt"
     success "Package lists saved"
 
-    if [[ -d "$USER_HOME/.config/hypr" ]]; then
-        info "Backing up Hyprland config separately..."
-        mkdir -p "$BACKUP_DIR/hypr-standalone"
-        cp -r "$USER_HOME/.config/hypr" "$BACKUP_DIR/hypr-standalone/" && success "Hyprland config done"
-    fi
-
     ln -sfn "$BACKUP_DIR" "$LATEST_LINK"
 
     echo ""
@@ -183,36 +177,32 @@ do_restore() {
     case "$OPT" in
         1)
             confirm "Restore EVERYTHING from $SELECTED? This will overwrite existing files." || exit 0
-            restore_item ".config"      "$SELECTED/.config"              "$USER_HOME/.config"
-            restore_item ".local/share" "$SELECTED/share"                "$USER_HOME/.local/share"
-            restore_item "SSH keys"     "$SELECTED/.ssh"                 "$USER_HOME/.ssh"
-            restore_item "GPG keys"     "$SELECTED/.gnupg"               "$USER_HOME/.gnupg"
-            restore_item "AppImages"    "$SELECTED/AppImages"            "$USER_HOME/AppImages"
+            restore_item "Home directory" "$SELECTED/home" "$USER_HOME"
             restore_fstab "$SELECTED"
             success "Full restore complete! Please reboot."
             ;;
         2)
             confirm "Restore .config? This will overwrite ~/.config." || exit 0
-            restore_item ".config" "$SELECTED/.config" "$USER_HOME/.config"
+            restore_item ".config" "$SELECTED/home/.config" "$USER_HOME/.config"
             ;;
         3)
             confirm "Restore Hyprland config?" || exit 0
-            restore_item "Hyprland" "$SELECTED/hypr-standalone/hypr" "$USER_HOME/.config/hypr"
+            restore_item "Hyprland" "$SELECTED/home/.config/hypr" "$USER_HOME/.config/hypr"
             ;;
         4)
             confirm "Restore SSH keys?" || exit 0
-            restore_item "SSH keys" "$SELECTED/.ssh" "$USER_HOME/.ssh"
+            restore_item "SSH keys" "$SELECTED/home/.ssh" "$USER_HOME/.ssh"
             chmod 700 "$USER_HOME/.ssh"
             chmod 600 "$USER_HOME/.ssh/"* 2>/dev/null || true
             ;;
         5)
             confirm "Restore GPG keys?" || exit 0
-            restore_item "GPG keys" "$SELECTED/.gnupg" "$USER_HOME/.gnupg"
+            restore_item "GPG keys" "$SELECTED/home/.gnupg" "$USER_HOME/.gnupg"
             chmod 700 "$USER_HOME/.gnupg"
             ;;
         6)
             confirm "Restore AppImages?" || exit 0
-            restore_item "AppImages" "$SELECTED/AppImages" "$USER_HOME/AppImages"
+            restore_item "AppImages" "$SELECTED/home/AppImages" "$USER_HOME/AppImages"
             ;;
         7)
             header "Package Restore Commands"
