@@ -1,2 +1,2 @@
 # cachyos-backup
-Script to backup my shit from cachyOS
+Script to backup my shit in CachyOS
