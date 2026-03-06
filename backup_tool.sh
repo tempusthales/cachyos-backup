@@ -3,17 +3,17 @@
 #  Author: Tempus Thales
 #  Description: Backup & Restore Script
 #  Usage: ./backup_tool.sh
-#  Version: 0.0.1
+#  Version: 0.0.2
 # ============================================================
 
 set -euo pipefail
 
-# ── Config ───────────────────────────────────────────────────
-BACKUP_ROOT="/mnt/llm-storage/backups"
-USER_HOME="${HOME}"
+# ── Config (set dynamically at startup) ──────────────────────
+BACKUP_ROOT=""
+USER_HOME=""
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-BACKUP_DIR="$BACKUP_ROOT/$TIMESTAMP"
-LATEST_LINK="$BACKUP_ROOT/latest"
+BACKUP_DIR=""
+LATEST_LINK=""
 
 # Colors
 RED='\033[0;31m'
@@ -35,7 +35,7 @@ confirm() {
     [[ "$ans" =~ ^[Yy]$ ]]
 }
 
-# ── Detect user ──────────────────────────────────────────────
+# ── Detect user & backup path ─────────────────────────────────
 detect_user() {
     local default_user
     default_user=$(whoami)
@@ -51,19 +51,18 @@ detect_user() {
     USER_HOME="/home/$INPUT_USER"
     info "Using home directory: $USER_HOME"
     echo ""
-}
 
-# ── Backup items ──────────────────────────────────────────────
-declare -A ITEMS=(
-    ["configs"]="$USER_HOME/.config"
-    ["local_share"]="$USER_HOME/.local/share"
-    ["ssh_keys"]="$USER_HOME/.ssh"
-    ["gpg_keys"]="$USER_HOME/.gnupg"
-    ["appimages"]="$USER_HOME/AppImages"
-    ["pictures"]="$USER_HOME/Pictures"
-    ["documents"]="$USER_HOME/Documents"
-    ["downloads_appimages"]="$USER_HOME/Downloads"
-)
+    local default_backup="/mnt/llm-storage/backups"
+    read -rp "Enter backup destination path [${default_backup}]: " INPUT_BACKUP
+    BACKUP_ROOT="${INPUT_BACKUP:-$default_backup}"
+
+    BACKUP_DIR="$BACKUP_ROOT/$TIMESTAMP"
+    LATEST_LINK="$BACKUP_ROOT/latest"
+
+    mkdir -p "$BACKUP_ROOT" || { error "Cannot create backup directory: $BACKUP_ROOT"; exit 1; }
+    info "Using backup location: $BACKUP_ROOT"
+    echo ""
+}
 
 # ── Backup ────────────────────────────────────────────────────
 do_backup() {
@@ -71,14 +70,12 @@ do_backup() {
 
     mkdir -p "$BACKUP_DIR"
 
-    # Configs & dotfiles
     info "Backing up .config..."
     cp -r "$USER_HOME/.config" "$BACKUP_DIR/" && success ".config done"
 
     info "Backing up .local/share..."
     cp -r "$USER_HOME/.local/share" "$BACKUP_DIR/" && success ".local/share done"
 
-    # SSH keys
     if [[ -d "$USER_HOME/.ssh" ]]; then
         info "Backing up SSH keys..."
         cp -r "$USER_HOME/.ssh" "$BACKUP_DIR/" && success "SSH keys done"
@@ -86,7 +83,6 @@ do_backup() {
         warn "No .ssh directory found, skipping"
     fi
 
-    # GPG keys
     if [[ -d "$USER_HOME/.gnupg" ]]; then
         info "Backing up GPG keys..."
         cp -r "$USER_HOME/.gnupg" "$BACKUP_DIR/" && success "GPG keys done"
@@ -94,38 +90,33 @@ do_backup() {
         warn "No .gnupg directory found, skipping"
     fi
 
-    # AppImages
     if [[ -d "$USER_HOME/AppImages" ]]; then
         info "Backing up AppImages..."
         cp -r "$USER_HOME/AppImages" "$BACKUP_DIR/" && success "AppImages done"
     fi
 
-    # AppImages from Downloads
     info "Backing up AppImages from Downloads..."
     mkdir -p "$BACKUP_DIR/downloads-appimages"
     find "$USER_HOME/Downloads" -maxdepth 1 \( -name "*.AppImage" -o -name "*.appimage" \) \
         -exec cp {} "$BACKUP_DIR/downloads-appimages/" \; 2>/dev/null && success "Downloads AppImages done"
 
-    # fstab
     info "Backing up /etc/fstab..."
     sudo cp /etc/fstab "$BACKUP_DIR/fstab" && success "fstab done"
 
-    # Package lists
     info "Saving package lists..."
     pacman -Qe > "$BACKUP_DIR/packages-explicit.txt"
     pacman -Qm > "$BACKUP_DIR/packages-aur.txt"
     pacman -Q  > "$BACKUP_DIR/packages-all.txt"
     success "Package lists saved"
 
-    # Hyprland specific
-    info "Backing up Hyprland config separately..."
-    mkdir -p "$BACKUP_DIR/hypr-standalone"
-    cp -r "$USER_HOME/.config/hypr" "$BACKUP_DIR/hypr-standalone/" && success "Hyprland config done"
+    if [[ -d "$USER_HOME/.config/hypr" ]]; then
+        info "Backing up Hyprland config separately..."
+        mkdir -p "$BACKUP_DIR/hypr-standalone"
+        cp -r "$USER_HOME/.config/hypr" "$BACKUP_DIR/hypr-standalone/" && success "Hyprland config done"
+    fi
 
-    # Update latest symlink
     ln -sfn "$BACKUP_DIR" "$LATEST_LINK"
 
-    # Summary
     echo ""
     success "Backup complete!"
     info "Location: $BACKUP_DIR"
@@ -133,14 +124,23 @@ do_backup() {
     echo ""
 }
 
-# ── Restore menu ──────────────────────────────────────────────
+# ── Pick backup source ────────────────────────────────────────
 pick_backup() {
-    header "Available Backups"
+    header "Select Backup Source"
 
-    mapfile -t BACKUPS < <(find "$BACKUP_ROOT" -mindepth 1 -maxdepth 1 -type d ! -name "latest" | sort -r)
+    local default_restore="$BACKUP_ROOT"
+    read -rp "Enter path to search for backups [${default_restore}]: " INPUT_RESTORE
+    local RESTORE_ROOT="${INPUT_RESTORE:-$default_restore}"
+
+    if [[ ! -d "$RESTORE_ROOT" ]]; then
+        error "Path does not exist: $RESTORE_ROOT"
+        exit 1
+    fi
+
+    mapfile -t BACKUPS < <(find "$RESTORE_ROOT" -mindepth 1 -maxdepth 1 -type d ! -name "latest" | sort -r)
 
     if [[ ${#BACKUPS[@]} -eq 0 ]]; then
-        error "No backups found in $BACKUP_ROOT"
+        error "No backups found in $RESTORE_ROOT"
         exit 1
     fi
 
@@ -148,7 +148,7 @@ pick_backup() {
     for i in "${!BACKUPS[@]}"; do
         SIZE=$(du -sh "${BACKUPS[$i]}" 2>/dev/null | cut -f1)
         DATE=$(basename "${BACKUPS[$i]}" | sed 's/_/ /' | sed 's/\([0-9]\{4\}\)\([0-9]\{2\}\)\([0-9]\{2\}\)/\1-\2-\3/')
-        echo -e "  ${BOLD}[$((i+1))]${RESET} $DATE  ${CYAN}(${SIZE})${RESET}"
+        echo -e "  ${BOLD}[$((i+1))]${RESET} $DATE  ${CYAN}(${SIZE})${RESET}  — ${BACKUPS[$i]}"
     done
     echo ""
 
@@ -183,11 +183,11 @@ do_restore() {
     case "$OPT" in
         1)
             confirm "Restore EVERYTHING from $SELECTED? This will overwrite existing files." || exit 0
-            restore_item ".config"        "$SELECTED/.config"        "$USER_HOME/.config"
-            restore_item ".local/share"   "$SELECTED/share"          "$USER_HOME/.local/share"
-            restore_item "SSH keys"       "$SELECTED/.ssh"           "$USER_HOME/.ssh"
-            restore_item "GPG keys"       "$SELECTED/.gnupg"         "$USER_HOME/.gnupg"
-            restore_item "AppImages"      "$SELECTED/AppImages"      "$USER_HOME/AppImages"
+            restore_item ".config"      "$SELECTED/.config"              "$USER_HOME/.config"
+            restore_item ".local/share" "$SELECTED/share"                "$USER_HOME/.local/share"
+            restore_item "SSH keys"     "$SELECTED/.ssh"                 "$USER_HOME/.ssh"
+            restore_item "GPG keys"     "$SELECTED/.gnupg"               "$USER_HOME/.gnupg"
+            restore_item "AppImages"    "$SELECTED/AppImages"            "$USER_HOME/AppImages"
             restore_fstab "$SELECTED"
             success "Full restore complete! Please reboot."
             ;;
@@ -265,7 +265,7 @@ restore_fstab() {
 
 # ── List backups ──────────────────────────────────────────────
 do_list() {
-    header "Available Backups"
+    header "Available Backups in $BACKUP_ROOT"
     mapfile -t BACKUPS < <(find "$BACKUP_ROOT" -mindepth 1 -maxdepth 1 -type d ! -name "latest" | sort -r)
 
     if [[ ${#BACKUPS[@]} -eq 0 ]]; then
@@ -275,7 +275,7 @@ do_list() {
 
     for B in "${BACKUPS[@]}"; do
         SIZE=$(du -sh "$B" 2>/dev/null | cut -f1)
-        echo -e "  ${CYAN}$(basename "$B")${RESET}  (${SIZE})"
+        echo -e "  ${CYAN}$(basename "$B")${RESET}  (${SIZE})  — $B"
     done
     echo ""
 }
@@ -292,7 +292,7 @@ do_cleanup() {
 
     echo "Keeping newest backup. The following will be deleted:"
     for B in "${BACKUPS[@]:1}"; do
-        echo -e "  ${RED}$(basename "$B")${RESET}"
+        echo -e "  ${RED}$(basename "$B")${RESET}  — $B"
     done
     echo ""
 
@@ -308,6 +308,7 @@ do_cleanup() {
 main_menu() {
     clear
     header "CachyOS Backup & Restore"
+    echo -e "  User:            ${CYAN}$USER_HOME${RESET}"
     echo -e "  Backup location: ${CYAN}$BACKUP_ROOT${RESET}"
     echo ""
     echo -e "  ${BOLD}[1]${RESET} Create new backup"
@@ -329,8 +330,5 @@ main_menu() {
 }
 
 # ── Entry point ───────────────────────────────────────────────
-# Ensure backup root exists
-mkdir -p "$BACKUP_ROOT"
-
 detect_user
 main_menu
