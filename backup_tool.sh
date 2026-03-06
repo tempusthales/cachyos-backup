@@ -3,7 +3,7 @@
 #  Author: Tempus Thales
 #  Description: Backup & Restore Script
 #  Usage: ./backup_tool.sh
-#  Version: 0.0.5
+#  Version: 0.0.6
 # ============================================================
 
 set -euo pipefail
