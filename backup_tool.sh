@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
 # ============================================================
 #  Author: Tempus Thales
-#  Description: CachyOS Backup & Restore Script
-#  Usage: ./cachyos-backup.sh
+#  Description: Backup & Restore Script
+#  Usage: ./backup_tool.sh
+#  Version: 0.0.1
 # ============================================================
 
 set -euo pipefail
 
 # ── Config ───────────────────────────────────────────────────
 BACKUP_ROOT="/mnt/llm-storage/backups"
-USER_HOME="/home/gjp"
+USER_HOME="${HOME}"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 BACKUP_DIR="$BACKUP_ROOT/$TIMESTAMP"
 LATEST_LINK="$BACKUP_ROOT/latest"
@@ -32,6 +33,24 @@ header()  { echo -e "\n${BOLD}${CYAN}══════════════�
 confirm() {
     read -rp "$1 [y/N] " ans
     [[ "$ans" =~ ^[Yy]$ ]]
+}
+
+# ── Detect user ──────────────────────────────────────────────
+detect_user() {
+    local default_user
+    default_user=$(whoami)
+    echo ""
+    read -rp "Enter username to backup [${default_user}]: " INPUT_USER
+    INPUT_USER="${INPUT_USER:-$default_user}"
+
+    if [[ ! -d "/home/$INPUT_USER" ]]; then
+        error "Home directory /home/$INPUT_USER does not exist"
+        exit 1
+    fi
+
+    USER_HOME="/home/$INPUT_USER"
+    info "Using home directory: $USER_HOME"
+    echo ""
 }
 
 # ── Backup items ──────────────────────────────────────────────
@@ -313,4 +332,5 @@ main_menu() {
 # Ensure backup root exists
 mkdir -p "$BACKUP_ROOT"
 
+detect_user
 main_menu
