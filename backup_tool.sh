@@ -3,7 +3,7 @@
 #  Author: Tempus Thales
 #  Description: Backup & Restore Script
 #  Usage: ./backup_tool.sh
-#  Version: 0.0.3
+#  Version: 0.0.5
 # ============================================================
 
 set -euo pipefail
@@ -67,6 +67,8 @@ detect_user() {
 # ── Backup ────────────────────────────────────────────────────
 do_backup() {
     header "Starting Backup → $BACKUP_DIR"
+    local total_start
+    total_start=$(date +%s)
 
     mkdir -p "$BACKUP_DIR"
 
@@ -111,10 +113,15 @@ do_backup() {
 
     ln -sfn "$BACKUP_DIR" "$LATEST_LINK"
 
+    local total_end total_elapsed
+    total_end=$(date +%s)
+    total_elapsed=$(( total_end - total_start ))
+
     echo ""
     success "Backup complete!"
     info "Location: $BACKUP_DIR"
-    info "Size: $(du -sh "$BACKUP_DIR" | cut -f1)"
+    info "Size:     $(du -sh "$BACKUP_DIR" | cut -f1)"
+    info "Duration: $(( total_elapsed / 60 ))m $(( total_elapsed % 60 ))s"
     echo ""
 }
 
@@ -320,5 +327,10 @@ main_menu() {
 }
 
 # ── Entry point ───────────────────────────────────────────────
+# Validate sudo upfront so it does not interrupt the backup
+echo ""
+info "This script requires sudo for backing up /etc/fstab."
+sudo -v || { error "sudo authentication failed"; exit 1; }
+
 detect_user
 main_menu
